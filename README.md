@@ -1,1 +1,1 @@
-Not finish, not usable.
+Not finished, not usable.
