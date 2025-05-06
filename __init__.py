@@ -111,7 +111,8 @@ def make_trunk_and_branches(context):
 
         for k in range(cnt):
             th = base_ang + k*(2*math.pi/cnt)
-            dir_local = Matrix.Rotation(th,4,'Z')@Vector((1,0,0))
+            # branches oriented along Y axis instead of X
+            dir_local = Matrix.Rotation(th,4,'Z') @ Vector((0,1,0))
             dir_world = wm.to_3x3()@dir_local
 
             base_ws = center_ws + dir_world*(r0*pen)
@@ -187,5 +188,4 @@ def unregister():
 
 if __name__=="__main__":
     register()
-
 
