@@ -1,11 +1,10 @@
 bl_info = {
     "name":        "MeshTree",
-    "author":      "Lars Øksendal",
+    "author":      "Lars Øksendal aka. [aCe]Total",
     "version":     (1, 0),
     "blender":     (4, 4, 0),
     "location":    "View3D > Sidebar > MeshTree",
     "description": "One way to create trees in Blender"
-    "category":    "Add Curve",
 }
 
 import bpy, math
@@ -147,7 +146,7 @@ class CURVE_OT_add_simple_tree(Operator):
 
 class VIEW3D_PT_add_trunk(Panel):
     bl_label="Add Trunk"; bl_idname="VIEW3D_PT_add_trunk"
-    bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category='TreeGen'
+    bl_space_type='VIEW_3D'; bl_region_type='UI'; bl_category='MeshTree'
     def draw(self,context):
         self.layout.operator("curve.add_simple_tree",icon='CURVE_DATA')
 
