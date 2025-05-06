@@ -14,7 +14,7 @@ from bpy.types import Operator, Panel
 def update_tree(self, context):
     bpy.ops.curve.add_simple_tree('INVOKE_DEFAULT')
 
-# Scene-egenskaper
+# Scene properties
 S = bpy.types.Scene
 S.tree_height           = bpy.props.FloatProperty("Trunk Height", default=2.0, min=0.1, max=10.0, update=update_tree)
 S.trunk_diameter_bottom = bpy.props.FloatProperty("Dia Bottom", default=0.2, min=0.01, max=2.0, update=update_tree)
@@ -28,8 +28,12 @@ for i in range(1,7):
         bpy.props.FloatProperty(f"Ring {i} Height", default=0.2*i/6, min=0.0, max=1.0, update=update_tree))
     setattr(S, f"branch{i}_count",
         bpy.props.IntProperty(f"Ring {i} Count", default=0, min=0, max=50, update=update_tree))
+    # rename Angle → Rotate
+    setattr(S, f"branch{i}_rotate",
+        bpy.props.FloatProperty(f"Ring {i} Rotate", default=0.0, min=0.0, max=360.0, update=update_tree))
+    # new up/down Angle along trunk normals
     setattr(S, f"branch{i}_angle",
-        bpy.props.FloatProperty(f"Ring {i} Angle", default=0.0, min=0.0, max=360.0, update=update_tree))
+        bpy.props.FloatProperty(f"Ring {i} Angle", default=0.0, min=-90.0, max=90.0, update=update_tree))
     setattr(S, f"branch{i}_bend",
         bpy.props.FloatProperty(f"Ring {i} Bend", default=0.0, min=0.0, max=1.0, update=update_tree))
     setattr(S, f"branch{i}_penetration",
@@ -70,6 +74,7 @@ def make_trunk_and_branches(context):
 
     wm = obj_c.matrix_world; wmi = wm.inverted()
 
+    # sample ring around trunk
     sample_local = [Vector((math.cos(a), math.sin(a), 0)) for a in [i*2*math.pi/16 for i in range(16)]]
 
     centers = {}
@@ -78,7 +83,7 @@ def make_trunk_and_branches(context):
         cnt = getattr(sc,f"branch{i}_count")
         if cnt==0: continue
 
-        # compute world_p and r0 for ring
+        # ring position and local bend
         t_ang = t0>bend_start and max_ang*(t0-bend_start)/(1-bend_start) or 0.0
         local_p = Matrix.Rotation(t_ang,4,'Y')@Vector((0,0,H*t0))
         if t0<0.5:
@@ -87,34 +92,40 @@ def make_trunk_and_branches(context):
             r0 = (1-(t0-0.5)/0.5)*d_mid + ((t0-0.5)/0.5)*d_top
         world_p = wm@local_p
 
-        # sample raycasts
+        # raycast to find true center
         hits = []
         for dir_local in sample_local:
             dir_world = wm.to_3x3()@dir_local
             hit, loc, *_ = obj_c.ray_cast(world_p + dir_world*(r0*2), -dir_world)
             if hit:
                 hits.append(loc)
-        # average or fallback
-        center_ws = (sum(hits, Vector())/len(hits)) if hits else world_p
-        centers[i] = (center_ws, r0)
+        centers[i] = ((sum(hits, Vector())/len(hits)) if hits else world_p, r0, t_ang)
 
     # create branches
     for i in range(1,7):
         cnt = getattr(sc,f"branch{i}_count")
         if cnt==0: continue
-        base_ang = math.radians(getattr(sc,f"branch{i}_angle"))
+        base_rot = math.radians(getattr(sc,f"branch{i}_rotate"))
+        elev_ang = math.radians(getattr(sc,f"branch{i}_angle"))
         rb = getattr(sc,f"branch{i}_bend")
         pen = getattr(sc,f"branch{i}_penetration")
         ln = getattr(sc,f"branch{i}_length")
         dia= getattr(sc,f"branch{i}_diameter")
-        center_ws, r0 = centers[i]
+        center_ws, r0, t_ang = centers[i]
+
+        # trunk tangent in local space
+        tangent_local = Matrix.Rotation(t_ang,4,'Y') @ Vector((0,0,1))
 
         for k in range(cnt):
-            th = base_ang + k*(2*math.pi/cnt)
-            # branches oriented along Y axis instead of X
-            dir_local = Matrix.Rotation(th,4,'Z') @ Vector((0,1,0))
-            dir_world = wm.to_3x3()@dir_local
+            th = base_rot + k*(2*math.pi/cnt)
+            dir_local = Vector((math.cos(th), math.sin(th), 0))
+            # apply elevation around axis perpendicular to trunk
+            axis = tangent_local.cross(dir_local)
+            if axis.length != 0:
+                axis.normalize()
+                dir_local = (Matrix.Rotation(elev_ang,4,axis) @ dir_local).normalized()
 
+            dir_world = wm.to_3x3()@dir_local
             base_ws = center_ws + dir_world*(r0*pen)
             base_ls = wmi@base_ws
 
@@ -123,7 +134,7 @@ def make_trunk_and_branches(context):
             blen = H*0.2*ln
             spl2 = C.splines.new('BEZIER'); spl2.bezier_points.add(3)
             for j,bp2 in enumerate(spl2.bezier_points):
-                tt=j/ (len(spl2.bezier_points)-1)
+                tt=j/(len(spl2.bezier_points)-1)
                 pt = base_ls + dir_local*(blen*tt)
                 pt.z += H*0.05*tt
                 bp2.co = Mbb@pt
@@ -170,9 +181,9 @@ class VIEW3D_PT_branch_settings(Panel):
         for i in range(1,7):
             b=l.box(); b.label(text=f"Branch Ring {i}")
             b.prop(sc,f"branch{i}_height"); b.prop(sc,f"branch{i}_count")
-            b.prop(sc,f"branch{i}_angle");  b.prop(sc,f"branch{i}_bend")
-            b.prop(sc,f"branch{i}_penetration"); b.prop(sc,f"branch{i}_length")
-            b.prop(sc,f"branch{i}_diameter")
+            b.prop(sc,f"branch{i}_rotate");  b.prop(sc,f"branch{i}_angle")
+            b.prop(sc,f"branch{i}_bend"); b.prop(sc,f"branch{i}_penetration")
+            b.prop(sc,f"branch{i}_length"); b.prop(sc,f"branch{i}_diameter")
 
 classes = (CURVE_OT_add_simple_tree, VIEW3D_PT_add_trunk, VIEW3D_PT_trunk_settings, VIEW3D_PT_branch_settings)
 
@@ -180,11 +191,18 @@ def register():
     for c in classes: bpy.utils.register_class(c)
 def unregister():
     for c in reversed(classes): bpy.utils.unregister_class(c)
-    props=["tree_height","trunk_diameter_bottom","trunk_diameter_middle","trunk_diameter_top","trunk_bend","trunk_bend_start"]
+    props = [
+        "tree_height","trunk_diameter_bottom","trunk_diameter_middle","trunk_diameter_top",
+        "trunk_bend","trunk_bend_start"
+    ]
     for i in range(1,7):
-        for suf in ("height","count","angle","bend","penetration","length","diameter"):
-            props.append(f"branch{i}_{suf}")
-    for p in props: delattr(bpy.types.Scene,p)
+        props += [
+            f"branch{i}_height", f"branch{i}_count",
+            f"branch{i}_rotate", f"branch{i}_angle",
+            f"branch{i}_bend", f"branch{i}_penetration",
+            f"branch{i}_length", f"branch{i}_diameter"
+        ]
+    for p in props: delattr(bpy.types.Scene, p)
 
 if __name__=="__main__":
     register()
